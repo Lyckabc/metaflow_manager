@@ -18,6 +18,9 @@ webhook(convoy) → endpoint → metaflow_manager (Trigger, WebhookAdapter) → 
 
 ```bash
 cd /morphogen/neunexus/cicd/temporal
+# go pre build
+go mod download
+# go run
 TEMPORAL_ADDRESS=127.0.0.1:7233 go run ./metaflow_manager/cmd/trigger
 ```
 
