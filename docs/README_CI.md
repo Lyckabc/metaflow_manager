@@ -23,13 +23,22 @@ metaflow_manager 프로젝트의 빌드, 테스트, CI 파이프라인 실행 �
 go build ./...
 ```
 
-### 2.2 단위 테스트
+### 2.2 Docker 빌드
+
+```bash
+cd metaflow_manager
+docker build -t registry.toji.homes/metaflow_manager:main-2602161631 .
+```
+
+- metaflow_cicd를 git clone하여 go mod replace 충족
+
+### 2.3 단위 테스트
 
 ```bash
 go test ./...
 ```
 
-### 2.3 CI 러너 실행 (빌드 + 테스트)
+### 2.4 CI 러너 실행 (빌드 + 테스트)
 
 ```bash
 go run ./flows/runner/metaflow_manager_ci.go
