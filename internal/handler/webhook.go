@@ -17,16 +17,6 @@ import (
 	"go.temporal.io/sdk/client"
 )
 
-// GitHubPushPayload for push events
-type GitHubPushPayload struct {
-	Ref    string `json:"ref"`
-	Repo   struct {
-		FullName  string `json:"full_name"`
-		CloneURL  string `json:"clone_url"`
-	} `json:"repository"`
-	After string `json:"after"` // commit SHA
-}
-
 // GitHubPullRequestPayload for pull_request events
 type GitHubPullRequestPayload struct {
 	Action string `json:"action"`
@@ -171,8 +161,12 @@ func GitHubWebhookHandler(temporalClient WorkflowStarter) http.HandlerFunc {
 		}
 
 		eventType := r.Header.Get("X-GitHub-Event")
-		var req workflow.PipelineRequest
-		var buildMode string
+
+		// Only pull_request events trigger metaflow_cicd pipeline. push, status, etc. are ignored.
+		if eventType != "pull_request" {
+			WriteJSON(w, http.StatusAccepted, map[string]string{"status": "ignored", "event": eventType})
+			return
+		}
 
 		// Try Convoy-wrapped format first
 		var convoy ConvoyEvent
@@ -180,51 +174,23 @@ func GitHubWebhookHandler(temporalClient WorkflowStarter) http.HandlerFunc {
 			body = convoy.Event.Data
 		}
 
-		// Convoy may not forward X-GitHub-Event; infer from payload when empty
-		if eventType == "" {
-			eventType = inferEventTypeFromPayload(body)
+		var pr GitHubPullRequestPayload
+		if err := json.Unmarshal(body, &pr); err != nil {
+			WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid pull_request payload: " + err.Error()})
+			return
 		}
-
-		if eventType == "pull_request" {
-			var pr GitHubPullRequestPayload
-			if err := json.Unmarshal(body, &pr); err != nil {
-				WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid pull_request payload: " + err.Error()})
-				return
-			}
-			req = workflow.PipelineRequest{
-				ServiceName:        pr.Repository.FullName,
-				RepoURL:            pr.Repository.CloneURL,
-				Branch:             pr.PullRequest.Head.Ref,
-				GitHubOwner:        extractOwner(pr.Repository.FullName),
-				GitHubRepo:         extractRepo(pr.Repository.FullName),
-				GitHubSHA:          pr.PullRequest.Head.SHA,
-				TemporalUIBaseURL:  os.Getenv("TEMPORAL_UI_BASE_URL"),
-			}
-			if mode, ok := buildModeFromPullRequest(pr); ok {
-				buildMode = mode
-			} else {
-				WriteJSON(w, http.StatusAccepted, map[string]string{"status": "ignored", "action": pr.Action})
-				return
-			}
-		} else if eventType == "push" {
-			var push GitHubPushPayload
-			if err := json.Unmarshal(body, &push); err != nil {
-				WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid push payload: " + err.Error()})
-				return
-			}
-			branch := strings.TrimPrefix(push.Ref, "refs/heads/")
-			req = workflow.PipelineRequest{
-				ServiceName:        push.Repo.FullName,
-				RepoURL:            push.Repo.CloneURL,
-				Branch:             branch,
-				GitHubOwner:        extractOwner(push.Repo.FullName),
-				GitHubRepo:         extractRepo(push.Repo.FullName),
-				GitHubSHA:          push.After,
-				TemporalUIBaseURL:  os.Getenv("TEMPORAL_UI_BASE_URL"),
-			}
-			buildMode = "cd"
-		} else {
-			WriteJSON(w, http.StatusAccepted, map[string]string{"status": "ignored", "event": eventType})
+		req := workflow.PipelineRequest{
+			ServiceName:        pr.Repository.FullName,
+			RepoURL:            pr.Repository.CloneURL,
+			Branch:             pr.PullRequest.Head.Ref,
+			GitHubOwner:        extractOwner(pr.Repository.FullName),
+			GitHubRepo:         extractRepo(pr.Repository.FullName),
+			GitHubSHA:          pr.PullRequest.Head.SHA,
+			TemporalUIBaseURL:  os.Getenv("TEMPORAL_UI_BASE_URL"),
+		}
+		buildMode, ok := buildModeFromPullRequest(pr)
+		if !ok {
+			WriteJSON(w, http.StatusAccepted, map[string]string{"status": "ignored", "action": pr.Action})
 			return
 		}
 
@@ -255,25 +221,6 @@ func GitHubWebhookHandler(temporalClient WorkflowStarter) http.HandlerFunc {
 			RunID:     we.GetRunID(),
 		})
 	}
-}
-
-// inferEventTypeFromPayload detects GitHub event type when X-GitHub-Event header is missing (e.g. Convoy).
-func inferEventTypeFromPayload(body []byte) string {
-	var m map[string]json.RawMessage
-	if json.Unmarshal(body, &m) != nil {
-		return ""
-	}
-	if _, ok := m["pull_request"]; ok {
-		if _, hasAction := m["action"]; hasAction {
-			return "pull_request"
-		}
-	}
-	if _, hasRef := m["ref"]; hasRef {
-		if _, hasAfter := m["after"]; hasAfter {
-			return "push"
-		}
-	}
-	return ""
 }
 
 func readBody(r *http.Request) ([]byte, error) {

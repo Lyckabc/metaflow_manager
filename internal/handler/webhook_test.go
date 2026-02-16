@@ -154,11 +154,11 @@ func TestWebhookPullRequestBuildMode(t *testing.T) {
 			wantMode:   "",
 		},
 		{
-			name:       "synchronize without X-GitHub-Event (Convoy) -> ci",
-			payload:    `{"action":"synchronize","number":1,"pull_request":{"merged":false,"head":{"ref":"feature","sha":"abc123"},"base":{"ref":"main"}},"repository":{"full_name":"Lyckabc/metaflow_manager","clone_url":"https://github.com/Lyckabc/metaflow_manager.git"}}`,
-			wantStatus: http.StatusAccepted,
-			wantMode:   "ci",
-			noEventHeader: true,
+			name:          "synchronize without X-GitHub-Event -> ignored (only pull_request header triggers)",
+			payload:       `{"action":"synchronize","number":1,"pull_request":{"merged":false,"head":{"ref":"feature","sha":"abc123"},"base":{"ref":"main"}},"repository":{"full_name":"Lyckabc/metaflow_manager","clone_url":"https://github.com/Lyckabc/metaflow_manager.git"}}`,
+			wantStatus:     http.StatusAccepted,
+			wantMode:       "",
+			noEventHeader:  true,
 		},
 	}
 	for _, tt := range tests {
@@ -181,7 +181,7 @@ func TestWebhookPullRequestBuildMode(t *testing.T) {
 	}
 }
 
-func TestWebhookPushBuildMode(t *testing.T) {
+func TestWebhookPushIgnored(t *testing.T) {
 	os.Setenv("CONVOY_ENDPOINT_SECRET", "")
 	os.Setenv("GITHUB_WEBHOOK_SECRET", "")
 	defer func() {
@@ -202,8 +202,9 @@ func TestWebhookPushBuildMode(t *testing.T) {
 	if rec.Code != http.StatusAccepted {
 		t.Errorf("status = %d, want 202", rec.Code)
 	}
-	if mock.lastReq.BuildMode != "cd" {
-		t.Errorf("BuildMode = %q, want cd", mock.lastReq.BuildMode)
+	// push events are ignored; only pull_request triggers metaflow_cicd
+	if mock.lastReq.BuildMode != "" {
+		t.Errorf("push should be ignored; BuildMode = %q, want empty", mock.lastReq.BuildMode)
 	}
 }
 
