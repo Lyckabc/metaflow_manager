@@ -51,12 +51,14 @@ GitHub/Convoy Webhook (POST /webhooks/github)     수동 테스트 (POST /trigge
 
 ### 1.3 이벤트별 BuildMode
 
-| 이벤트 | Action | BuildMode |
-|--------|--------|-----------|
-| `push` | - | `cd` |
-| `pull_request` | `opened`, `synchronize` | `ci` |
-| `pull_request` | `closed` | `cd` |
-| 그 외 | - | 무시 (202 Accepted) |
+| 이벤트 | Action | 조건 | BuildMode |
+|--------|--------|------|-----------|
+| `push` | - | - | `cd` |
+| `pull_request` | `opened`, `synchronize` | - | `ci` |
+| `pull_request` | `closed` | `merged: true` | `cd` |
+| 그 외 | - | - | 무시 (202 Accepted) |
+
+**참고:** PR이 `closed`이면서 `merged: false`인 경우(예: merge 없이 닫힌 PR)는 CD를 실행하지 않고 무시합니다.
 
 ### 1.4 수동 트리거 (POST /trigger) — CI 테스트용
 
@@ -100,7 +102,7 @@ Git webhook 없이 워크플로우를 수동으로 시작할 때 사용합니다
 | `ServiceName` | string | 저장소 전체 이름 | `push.Repo.FullName` (예: `owner/repo`) | `pr.Repository.FullName` |
 | `RepoURL` | string | clone URL | `push.Repo.CloneURL` | `pr.Repository.CloneURL` |
 | `Branch` | string | 대상 브랜치 | `refs/heads/` 제거 후 (예: `main`) | `pr.PullRequest.Head.Ref` |
-| `BuildMode` | string | `"ci"` 또는 `"cd"` | `cd` | `opened`/`synchronize` → `ci`, `closed` → `cd` |
+| `BuildMode` | string | `"ci"` 또는 `"cd"` | `cd` | `opened`/`synchronize` → `ci`, `closed`+`merged: true` → `cd` |
 | `GitHubOwner` | string | GitHub org/owner | `FullName`에서 추출 | 동일 |
 | `GitHubRepo` | string | GitHub repo 이름 | `FullName`에서 추출 | 동일 |
 | `GitHubSHA` | string | 커밋 SHA | `push.After` | `pr.PullRequest.Head.SHA` |
@@ -125,6 +127,7 @@ Git webhook 없이 워크플로우를 수동으로 시작할 때 사용합니다
 {
   "action": "opened" | "synchronize" | "closed",
   "pull_request": {
+    "merged": true,
     "head": { "ref": "feature-branch", "sha": "a1b2c3d..." },
     "base": { "ref": "main" }
   },
@@ -134,6 +137,8 @@ Git webhook 없이 워크플로우를 수동으로 시작할 때 사용합니다
   }
 }
 ```
+
+- `action: "closed"`일 때 CD를 실행하려면 `pull_request.merged`가 `true`여야 합니다. `merged: false`(merge 없이 닫힌 PR)는 무시됩니다.
 
 ---
 
