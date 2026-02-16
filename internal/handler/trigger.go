@@ -27,7 +27,7 @@ type TriggerResponse struct {
 }
 
 // TriggerHandler starts ManagerWorkflow via Temporal client
-func TriggerHandler(temporalClient client.Client) http.HandlerFunc {
+func TriggerHandler(temporalClient WorkflowStarter) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})

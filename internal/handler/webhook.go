@@ -127,8 +127,13 @@ func verifyWithEncoding(secret, payload []byte, signature string, encoding strin
 	return hmac.Equal(decoded, expected)
 }
 
+// WorkflowStarter is a minimal interface for starting workflows (allows mocking in tests).
+type WorkflowStarter interface {
+	ExecuteWorkflow(ctx context.Context, options client.StartWorkflowOptions, workflow interface{}, args ...interface{}) (client.WorkflowRun, error)
+}
+
 // GitHubWebhookHandler handles POST /webhooks/github (GitHub or Convoy delivery)
-func GitHubWebhookHandler(temporalClient client.Client) http.HandlerFunc {
+func GitHubWebhookHandler(temporalClient WorkflowStarter) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
@@ -190,10 +195,8 @@ func GitHubWebhookHandler(temporalClient client.Client) http.HandlerFunc {
 				GitHubSHA:          pr.PullRequest.Head.SHA,
 				TemporalUIBaseURL:  os.Getenv("TEMPORAL_UI_BASE_URL"),
 			}
-			if pr.Action == "opened" || pr.Action == "synchronize" {
-				buildMode = "ci"
-			} else if pr.Action == "closed" && pr.PullRequest.Merged {
-				buildMode = "cd"
+			if mode, ok := buildModeFromPullRequest(pr); ok {
+				buildMode = mode
 			} else {
 				WriteJSON(w, http.StatusAccepted, map[string]string{"status": "ignored", "action": pr.Action})
 				return
@@ -253,6 +256,18 @@ func readBody(r *http.Request) ([]byte, error) {
 	const maxBody = 1 << 20
 	r.Body = http.MaxBytesReader(nil, r.Body, maxBody)
 	return io.ReadAll(r.Body)
+}
+
+// buildModeFromPullRequest returns ("ci"|"cd", true) if action should trigger, else ("", false).
+func buildModeFromPullRequest(pr GitHubPullRequestPayload) (string, bool) {
+	switch {
+	case pr.Action == "opened" || pr.Action == "synchronize":
+		return "ci", true
+	case pr.Action == "closed" && pr.PullRequest.Merged:
+		return "cd", true
+	default:
+		return "", false
+	}
 }
 
 func extractOwner(fullName string) string {
