@@ -49,6 +49,11 @@ const (
 	workflowTimeout    = 20 * time.Minute
 )
 
+// WorkflowRunner is the interface for executing ManagerWorkflow (for testability).
+type WorkflowRunner interface {
+	ExecuteWorkflow(ctx context.Context, options client.StartWorkflowOptions, workflow interface{}, args ...interface{}) (client.WorkflowRun, error)
+}
+
 func main() {
 	temporal := flag.Bool("temporal", false, "trigger Temporal workflow (integration test)")
 	wait := flag.Bool("wait", false, "wait for workflow completion (requires -temporal)")
@@ -85,7 +90,6 @@ func main() {
 		return
 	}
 
-	fmt.Println("=== 3. Temporal integration test ===")
 	temporalAddr := os.Getenv("TEMPORAL_ADDRESS")
 	if temporalAddr == "" {
 		temporalAddr = defaultTemporalAddr
@@ -95,12 +99,17 @@ func main() {
 		apiURL = defaultAPIURL
 	}
 
-	projectName := defaultProjectName
-	repoURL := defaultRepoURL
+	if err := runTemporalIntegration(context.Background(), temporalAddr, apiURL, defaultProjectName, defaultRepoURL, *branch, *mode, *createProject, *wait); err != nil {
+		log.Fatalf("Temporal integration: %v", err)
+	}
+}
 
-	if *createProject {
+// runTemporalIntegration connects to Temporal, optionally creates project, triggers ManagerWorkflow.
+func runTemporalIntegration(ctx context.Context, temporalAddr, apiURL, projectName, repoURL, branch, mode string, createProject, wait bool) error {
+	fmt.Println("=== 3. Temporal integration test ===")
+	if createProject {
 		fmt.Println(" Create/Update project...")
-		if err := createOrUpdateProject(apiURL, projectName, repoURL, *branch, *mode); err != nil {
+		if err := createOrUpdateProject(apiURL, projectName, repoURL, branch, mode); err != nil {
 			log.Printf("Create project (may exist): %v", err)
 		}
 	}
@@ -111,11 +120,16 @@ func main() {
 		Namespace: client.DefaultNamespace,
 	})
 	if err != nil {
-		log.Fatalf("Temporal client: %v", err)
+		return fmt.Errorf("Temporal client: %w", err)
 	}
 	defer c.Close()
 
-	workflowID := "ci-" + strings.ReplaceAll(projectName, "/", "-") + "-" + *branch + "-test"
+	return triggerAndWaitWorkflow(ctx, c, projectName, repoURL, branch, mode, wait)
+}
+
+// triggerAndWaitWorkflow starts ManagerWorkflow and optionally waits for completion.
+func triggerAndWaitWorkflow(ctx context.Context, runner WorkflowRunner, projectName, repoURL, branch, mode string, wait bool) error {
+	workflowID := "ci-" + strings.ReplaceAll(projectName, "/", "-") + "-" + branch + "-test"
 	options := client.StartWorkflowOptions{
 		ID:                   workflowID,
 		TaskQueue:            taskQueue,
@@ -126,43 +140,44 @@ func main() {
 	req := workflow.PipelineRequest{
 		ServiceName:       projectName,
 		RepoURL:           repoURL,
-		Branch:            *branch,
-		BuildMode:         *mode,
+		Branch:            branch,
+		BuildMode:         mode,
 		TemporalUIBaseURL: os.Getenv("TEMPORAL_UI_BASE_URL"),
 	}
 
-	we, err := c.ExecuteWorkflow(context.Background(), options, workflow.ManagerWorkflowType, req)
+	we, err := runner.ExecuteWorkflow(ctx, options, workflow.ManagerWorkflowType, req)
 	if err != nil {
-		log.Fatalf("ExecuteWorkflow: %v", err)
+		return fmt.Errorf("ExecuteWorkflow: %w", err)
 	}
 
 	fmt.Printf(" Workflow ID: %s\n", we.GetID())
 	fmt.Printf(" Run ID:     %s\n", we.GetRunID())
 
-	if *wait {
-		fmt.Println(" Waiting for workflow completion...")
-		var result workflow.RunResult
-		err = we.Get(context.Background(), &result)
-		if err != nil {
-			log.Fatalf("Workflow failed: %v", err)
-		}
-		fmt.Printf(" Success: %v, ExitCode: %d\n", result.Success, result.ExitCode)
-		if result.Stdout != "" {
-			fmt.Println("--- Stdout ---")
-			fmt.Println(result.Stdout)
-		}
-		if result.Stderr != "" {
-			fmt.Println("--- Stderr ---")
-			fmt.Println(result.Stderr)
-		}
-		if !result.Success {
-			os.Exit(result.ExitCode)
-		}
-		fmt.Println("\nIntegration test passed.")
-	} else {
+	if !wait {
 		fmt.Println("\n Check Temporal UI for execution status.")
 		fmt.Println(" Use -wait to block until workflow completes.")
+		return nil
 	}
+
+	fmt.Println(" Waiting for workflow completion...")
+	var result workflow.RunResult
+	if err = we.Get(ctx, &result); err != nil {
+		return fmt.Errorf("workflow failed: %w", err)
+	}
+	fmt.Printf(" Success: %v, ExitCode: %d\n", result.Success, result.ExitCode)
+	if result.Stdout != "" {
+		fmt.Println("--- Stdout ---")
+		fmt.Println(result.Stdout)
+	}
+	if result.Stderr != "" {
+		fmt.Println("--- Stderr ---")
+		fmt.Println(result.Stderr)
+	}
+	if !result.Success {
+		return fmt.Errorf("workflow exited with code %d", result.ExitCode)
+	}
+	fmt.Println("\nIntegration test passed.")
+	return nil
 }
 
 func runCmd(name string, args ...string) error {
