@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/neunexus/metaflow_cicd/workflow"
+	"metaflow_manager/internal/workflow"
 	"go.temporal.io/sdk/client"
 )
 
@@ -129,10 +129,11 @@ func TestWebhookPullRequestBuildMode(t *testing.T) {
 	handler := GitHubWebhookHandler(mock)
 
 	tests := []struct {
-		name       string
-		payload    string
-		wantStatus int
-		wantMode   string
+		name           string
+		payload        string
+		wantStatus     int
+		wantMode       string
+		noEventHeader  bool // simulate Convoy not forwarding X-GitHub-Event
 	}{
 		{
 			name: "synchronize -> ci",
@@ -152,11 +153,20 @@ func TestWebhookPullRequestBuildMode(t *testing.T) {
 			wantStatus: http.StatusAccepted,
 			wantMode:   "",
 		},
+		{
+			name:          "synchronize without X-GitHub-Event -> ignored (only pull_request header triggers)",
+			payload:       `{"action":"synchronize","number":1,"pull_request":{"merged":false,"head":{"ref":"feature","sha":"abc123"},"base":{"ref":"main"}},"repository":{"full_name":"Lyckabc/metaflow_manager","clone_url":"https://github.com/Lyckabc/metaflow_manager.git"}}`,
+			wantStatus:     http.StatusAccepted,
+			wantMode:       "",
+			noEventHeader:  true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodPost, "/webhooks/github", strings.NewReader(tt.payload))
-			req.Header.Set("X-GitHub-Event", "pull_request")
+			if !tt.noEventHeader {
+				req.Header.Set("X-GitHub-Event", "pull_request")
+			}
 			rec := httptest.NewRecorder()
 
 			handler.ServeHTTP(rec, req)
@@ -171,7 +181,7 @@ func TestWebhookPullRequestBuildMode(t *testing.T) {
 	}
 }
 
-func TestWebhookPushBuildMode(t *testing.T) {
+func TestWebhookPushIgnored(t *testing.T) {
 	os.Setenv("CONVOY_ENDPOINT_SECRET", "")
 	os.Setenv("GITHUB_WEBHOOK_SECRET", "")
 	defer func() {
@@ -192,8 +202,9 @@ func TestWebhookPushBuildMode(t *testing.T) {
 	if rec.Code != http.StatusAccepted {
 		t.Errorf("status = %d, want 202", rec.Code)
 	}
-	if mock.lastReq.BuildMode != "cd" {
-		t.Errorf("BuildMode = %q, want cd", mock.lastReq.BuildMode)
+	// push events are ignored; only pull_request triggers metaflow_cicd
+	if mock.lastReq.BuildMode != "" {
+		t.Errorf("push should be ignored; BuildMode = %q, want empty", mock.lastReq.BuildMode)
 	}
 }
 

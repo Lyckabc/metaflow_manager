@@ -6,7 +6,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/neunexus/metaflow_manager/internal/handler"
+	"metaflow_manager/internal/handler"
 	"go.temporal.io/sdk/client"
 )
 

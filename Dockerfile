@@ -1,16 +1,16 @@
 # metaflow_manager: Trigger (WebhookAdapter + Temporal workflow starter)
-# Build context: temporal/ (parent) - needs metaflow_cicd for go mod replace
+#
+# Build context: metaflow_manager/ (현재 디렉터리)
+# 사용법: cd metaflow_manager && docker build -t ...
+# docker-compose: context: ./metaflow_manager
+#
 FROM golang:1.24-alpine AS builder
 RUN apk add --no-cache git
 WORKDIR /app
 
-# Copy metaflow_cicd (required by go mod replace)
-COPY metaflow_cicd ./metaflow_cicd
-# Copy metaflow_manager
-COPY metaflow_manager/go.mod metaflow_manager/go.sum ./metaflow_manager/
-COPY metaflow_manager ./metaflow_manager/
+COPY go.mod go.sum ./
+COPY . .
 
-WORKDIR /app/metaflow_manager
 RUN go mod download
 RUN go build -o /trigger ./cmd/trigger
 

@@ -247,3 +247,11 @@ metaflow_manager는 워크플로우를 **비동기**로 시작하고 즉시 HTTP
 # trigger가 Docker 내부에만 있는 경우
 TRIGGER_VIA_DOCKER=1 ./scripts/test_pipeline.sh
 ```
+
+---
+
+## 7. 관련 문서
+
+| 문서 | 설명 |
+|------|------|
+| [README_CI.md](./README_CI.md) | metaflow_manager CI 가이드 (빌드, 테스트, flows/runner, metaflow_manager.toml) |

@@ -1,11 +1,8 @@
-module github.com/neunexus/metaflow_manager
+module metaflow_manager
 
 go 1.24.0
 
-require (
-	github.com/neunexus/metaflow_cicd v0.0.0
-	go.temporal.io/sdk v1.39.0
-)
+require go.temporal.io/sdk v1.39.0
 
 require (
 	github.com/davecgh/go-spew v1.1.1 // indirect
@@ -32,5 +29,3 @@ require (
 	google.golang.org/protobuf v1.36.6 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
-
-replace github.com/neunexus/metaflow_cicd => ../metaflow_cicd

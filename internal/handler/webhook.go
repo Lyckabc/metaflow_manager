@@ -13,19 +13,9 @@ import (
 	"os"
 	"strings"
 
-	"github.com/neunexus/metaflow_cicd/workflow"
+	"metaflow_manager/internal/workflow"
 	"go.temporal.io/sdk/client"
 )
-
-// GitHubPushPayload for push events
-type GitHubPushPayload struct {
-	Ref    string `json:"ref"`
-	Repo   struct {
-		FullName  string `json:"full_name"`
-		CloneURL  string `json:"clone_url"`
-	} `json:"repository"`
-	After string `json:"after"` // commit SHA
-}
 
 // GitHubPullRequestPayload for pull_request events
 type GitHubPullRequestPayload struct {
@@ -171,8 +161,12 @@ func GitHubWebhookHandler(temporalClient WorkflowStarter) http.HandlerFunc {
 		}
 
 		eventType := r.Header.Get("X-GitHub-Event")
-		var req workflow.PipelineRequest
-		var buildMode string
+
+		// Only pull_request events trigger metaflow_cicd pipeline. push, status, etc. are ignored.
+		if eventType != "pull_request" {
+			WriteJSON(w, http.StatusAccepted, map[string]string{"status": "ignored", "event": eventType})
+			return
+		}
 
 		// Try Convoy-wrapped format first
 		var convoy ConvoyEvent
@@ -180,46 +174,23 @@ func GitHubWebhookHandler(temporalClient WorkflowStarter) http.HandlerFunc {
 			body = convoy.Event.Data
 		}
 
-		if eventType == "pull_request" {
-			var pr GitHubPullRequestPayload
-			if err := json.Unmarshal(body, &pr); err != nil {
-				WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid pull_request payload: " + err.Error()})
-				return
-			}
-			req = workflow.PipelineRequest{
-				ServiceName:        pr.Repository.FullName,
-				RepoURL:            pr.Repository.CloneURL,
-				Branch:             pr.PullRequest.Head.Ref,
-				GitHubOwner:        extractOwner(pr.Repository.FullName),
-				GitHubRepo:         extractRepo(pr.Repository.FullName),
-				GitHubSHA:          pr.PullRequest.Head.SHA,
-				TemporalUIBaseURL:  os.Getenv("TEMPORAL_UI_BASE_URL"),
-			}
-			if mode, ok := buildModeFromPullRequest(pr); ok {
-				buildMode = mode
-			} else {
-				WriteJSON(w, http.StatusAccepted, map[string]string{"status": "ignored", "action": pr.Action})
-				return
-			}
-		} else if eventType == "push" || eventType == "" {
-			var push GitHubPushPayload
-			if err := json.Unmarshal(body, &push); err != nil {
-				WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid push payload: " + err.Error()})
-				return
-			}
-			branch := strings.TrimPrefix(push.Ref, "refs/heads/")
-			req = workflow.PipelineRequest{
-				ServiceName:        push.Repo.FullName,
-				RepoURL:            push.Repo.CloneURL,
-				Branch:             branch,
-				GitHubOwner:        extractOwner(push.Repo.FullName),
-				GitHubRepo:         extractRepo(push.Repo.FullName),
-				GitHubSHA:          push.After,
-				TemporalUIBaseURL:  os.Getenv("TEMPORAL_UI_BASE_URL"),
-			}
-			buildMode = "cd"
-		} else {
-			WriteJSON(w, http.StatusAccepted, map[string]string{"status": "ignored", "event": eventType})
+		var pr GitHubPullRequestPayload
+		if err := json.Unmarshal(body, &pr); err != nil {
+			WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid pull_request payload: " + err.Error()})
+			return
+		}
+		req := workflow.PipelineRequest{
+			ServiceName:        pr.Repository.FullName,
+			RepoURL:            pr.Repository.CloneURL,
+			Branch:             pr.PullRequest.Head.Ref,
+			GitHubOwner:        extractOwner(pr.Repository.FullName),
+			GitHubRepo:         extractRepo(pr.Repository.FullName),
+			GitHubSHA:          pr.PullRequest.Head.SHA,
+			TemporalUIBaseURL:  os.Getenv("TEMPORAL_UI_BASE_URL"),
+		}
+		buildMode, ok := buildModeFromPullRequest(pr)
+		if !ok {
+			WriteJSON(w, http.StatusAccepted, map[string]string{"status": "ignored", "action": pr.Action})
 			return
 		}
 
@@ -237,14 +208,14 @@ func GitHubWebhookHandler(temporalClient WorkflowStarter) http.HandlerFunc {
 			TaskQueue: "ci-task-queue",
 		}
 
-		we, err := temporalClient.ExecuteWorkflow(context.Background(), options, workflow.ManagerWorkflow, req)
+		we, err := temporalClient.ExecuteWorkflow(context.Background(), options, workflow.ManagerWorkflowType, req)
 		if err != nil {
 			log.Printf("ExecuteWorkflow error: %v", err)
 			WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
 		}
 
-		log.Printf("Workflow started from webhook: %s", we.GetID())
+		log.Printf("Workflow started from webhook: %s (event=%s, buildMode=%s)", we.GetID(), eventType, buildMode)
 		WriteJSON(w, http.StatusAccepted, TriggerResponse{
 			WorkflowID: we.GetID(),
 			RunID:     we.GetRunID(),
