@@ -129,10 +129,11 @@ func TestWebhookPullRequestBuildMode(t *testing.T) {
 	handler := GitHubWebhookHandler(mock)
 
 	tests := []struct {
-		name       string
-		payload    string
-		wantStatus int
-		wantMode   string
+		name           string
+		payload        string
+		wantStatus     int
+		wantMode       string
+		noEventHeader  bool // simulate Convoy not forwarding X-GitHub-Event
 	}{
 		{
 			name: "synchronize -> ci",
@@ -152,11 +153,20 @@ func TestWebhookPullRequestBuildMode(t *testing.T) {
 			wantStatus: http.StatusAccepted,
 			wantMode:   "",
 		},
+		{
+			name:       "synchronize without X-GitHub-Event (Convoy) -> ci",
+			payload:    `{"action":"synchronize","number":1,"pull_request":{"merged":false,"head":{"ref":"feature","sha":"abc123"},"base":{"ref":"main"}},"repository":{"full_name":"Lyckabc/metaflow_manager","clone_url":"https://github.com/Lyckabc/metaflow_manager.git"}}`,
+			wantStatus: http.StatusAccepted,
+			wantMode:   "ci",
+			noEventHeader: true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodPost, "/webhooks/github", strings.NewReader(tt.payload))
-			req.Header.Set("X-GitHub-Event", "pull_request")
+			if !tt.noEventHeader {
+				req.Header.Set("X-GitHub-Event", "pull_request")
+			}
 			rec := httptest.NewRecorder()
 
 			handler.ServeHTTP(rec, req)

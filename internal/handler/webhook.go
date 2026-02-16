@@ -180,6 +180,11 @@ func GitHubWebhookHandler(temporalClient WorkflowStarter) http.HandlerFunc {
 			body = convoy.Event.Data
 		}
 
+		// Convoy may not forward X-GitHub-Event; infer from payload when empty
+		if eventType == "" {
+			eventType = inferEventTypeFromPayload(body)
+		}
+
 		if eventType == "pull_request" {
 			var pr GitHubPullRequestPayload
 			if err := json.Unmarshal(body, &pr); err != nil {
@@ -201,7 +206,7 @@ func GitHubWebhookHandler(temporalClient WorkflowStarter) http.HandlerFunc {
 				WriteJSON(w, http.StatusAccepted, map[string]string{"status": "ignored", "action": pr.Action})
 				return
 			}
-		} else if eventType == "push" || eventType == "" {
+		} else if eventType == "push" {
 			var push GitHubPushPayload
 			if err := json.Unmarshal(body, &push); err != nil {
 				WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid push payload: " + err.Error()})
@@ -244,12 +249,31 @@ func GitHubWebhookHandler(temporalClient WorkflowStarter) http.HandlerFunc {
 			return
 		}
 
-		log.Printf("Workflow started from webhook: %s", we.GetID())
+		log.Printf("Workflow started from webhook: %s (event=%s, buildMode=%s)", we.GetID(), eventType, buildMode)
 		WriteJSON(w, http.StatusAccepted, TriggerResponse{
 			WorkflowID: we.GetID(),
 			RunID:     we.GetRunID(),
 		})
 	}
+}
+
+// inferEventTypeFromPayload detects GitHub event type when X-GitHub-Event header is missing (e.g. Convoy).
+func inferEventTypeFromPayload(body []byte) string {
+	var m map[string]json.RawMessage
+	if json.Unmarshal(body, &m) != nil {
+		return ""
+	}
+	if _, ok := m["pull_request"]; ok {
+		if _, hasAction := m["action"]; hasAction {
+			return "pull_request"
+		}
+	}
+	if _, hasRef := m["ref"]; hasRef {
+		if _, hasAfter := m["after"]; hasAfter {
+			return "push"
+		}
+	}
+	return ""
 }
 
 func readBody(r *http.Request) ([]byte, error) {
