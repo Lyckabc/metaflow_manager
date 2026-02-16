@@ -31,7 +31,8 @@ type GitHubPushPayload struct {
 type GitHubPullRequestPayload struct {
 	Action string `json:"action"`
 	PullRequest struct {
-		Head struct {
+		Merged bool `json:"merged"`
+		Head   struct {
 			Ref  string `json:"ref"`
 			SHA  string `json:"sha"`
 		} `json:"head"`
@@ -191,7 +192,7 @@ func GitHubWebhookHandler(temporalClient client.Client) http.HandlerFunc {
 			}
 			if pr.Action == "opened" || pr.Action == "synchronize" {
 				buildMode = "ci"
-			} else if pr.Action == "closed" {
+			} else if pr.Action == "closed" && pr.PullRequest.Merged {
 				buildMode = "cd"
 			} else {
 				WriteJSON(w, http.StatusAccepted, map[string]string{"status": "ignored", "action": pr.Action})
