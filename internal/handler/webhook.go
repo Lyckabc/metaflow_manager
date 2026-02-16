@@ -13,7 +13,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/neunexus/metaflow_cicd/workflow"
+	"metaflow_manager/internal/workflow"
 	"go.temporal.io/sdk/client"
 )
 
@@ -237,7 +237,7 @@ func GitHubWebhookHandler(temporalClient WorkflowStarter) http.HandlerFunc {
 			TaskQueue: "ci-task-queue",
 		}
 
-		we, err := temporalClient.ExecuteWorkflow(context.Background(), options, workflow.ManagerWorkflow, req)
+		we, err := temporalClient.ExecuteWorkflow(context.Background(), options, workflow.ManagerWorkflowType, req)
 		if err != nil {
 			log.Printf("ExecuteWorkflow error: %v", err)
 			WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})

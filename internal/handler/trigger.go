@@ -8,7 +8,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/neunexus/metaflow_cicd/workflow"
+	"metaflow_manager/internal/workflow"
 	"go.temporal.io/sdk/client"
 )
 
@@ -67,7 +67,7 @@ func TriggerHandler(temporalClient WorkflowStarter) http.HandlerFunc {
 			TemporalUIBaseURL:  os.Getenv("TEMPORAL_UI_BASE_URL"),
 		}
 
-		we, err := temporalClient.ExecuteWorkflow(context.Background(), options, workflow.ManagerWorkflow, args)
+		we, err := temporalClient.ExecuteWorkflow(context.Background(), options, workflow.ManagerWorkflowType, args)
 		if err != nil {
 			log.Printf("ExecuteWorkflow error: %v", err)
 			WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})

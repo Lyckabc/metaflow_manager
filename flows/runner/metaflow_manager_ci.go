@@ -33,7 +33,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/neunexus/metaflow_cicd/workflow"
+	"metaflow_manager/internal/workflow"
 	"go.temporal.io/sdk/client"
 )
 
@@ -131,7 +131,7 @@ func main() {
 		TemporalUIBaseURL: os.Getenv("TEMPORAL_UI_BASE_URL"),
 	}
 
-	we, err := c.ExecuteWorkflow(context.Background(), options, workflow.ManagerWorkflow, req)
+	we, err := c.ExecuteWorkflow(context.Background(), options, workflow.ManagerWorkflowType, req)
 	if err != nil {
 		log.Fatalf("ExecuteWorkflow: %v", err)
 	}

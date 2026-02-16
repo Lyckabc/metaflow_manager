@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/neunexus/metaflow_cicd/workflow"
+	"metaflow_manager/internal/workflow"
 	"go.temporal.io/sdk/client"
 )
 
