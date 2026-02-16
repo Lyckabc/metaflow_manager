@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"io"
@@ -54,32 +55,75 @@ type ConvoyEvent struct {
 	} `json:"event"`
 }
 
-func verifyConvoySignature(secret, payload []byte, signature string) bool {
+// verifyConvoySignature verifies X-Convoy-Signature per Convoy docs.
+// Simple: X-Convoy-Signature: <hex-hash>  → HMAC-SHA256(secret, payload)
+// Advanced: t=<unix>,v1=<hash>,v0=<hash>   → HMAC-SHA256(secret, "{timestamp},{payload}")
+// Tries hex first, then base64 (Convoy project encoding may vary).
+func verifyConvoySignature(secret, payload []byte, signature string, encoding string) bool {
 	if secret == nil || len(secret) == 0 {
 		return true
 	}
-	// Simple format: X-Convoy-Signature: <hash>
-	// Advanced: t=...,v1=...
-	parts := strings.Split(signature, ",")
-	for _, p := range parts {
-		p = strings.TrimSpace(p)
-		if strings.HasPrefix(p, "v1=") {
-			p = strings.TrimPrefix(p, "v1=")
-		} else if strings.HasPrefix(p, "t=") {
+	for _, enc := range []string{encoding, "hex", "base64"} {
+		if enc == "" {
 			continue
 		}
-		mac := hmac.New(sha256.New, secret)
-		mac.Write(payload)
-		expected := hex.EncodeToString(mac.Sum(nil))
-		if hmac.Equal([]byte(p), []byte(expected)) {
+		if verifyWithEncoding(secret, payload, signature, enc) {
 			return true
 		}
 	}
-	// Fallback: entire header as single hash
-	mac := hmac.New(sha256.New, secret)
-	mac.Write(payload)
-	expected := hex.EncodeToString(mac.Sum(nil))
-	return hmac.Equal([]byte(signature), []byte(expected))
+	return false
+}
+
+func verifyWithEncoding(secret, payload []byte, signature string, encoding string) bool {
+	decodeSig := func(s string) ([]byte, bool) {
+		s = strings.TrimSpace(s)
+		if encoding == "base64" {
+			b, err := base64.StdEncoding.DecodeString(s)
+			return b, err == nil
+		}
+		b, err := hex.DecodeString(s)
+		return b, err == nil
+	}
+
+	computeHMAC := func(data []byte) []byte {
+		mac := hmac.New(sha256.New, secret)
+		mac.Write(data)
+		return mac.Sum(nil)
+	}
+
+	parts := strings.Split(signature, ",")
+	if len(parts) > 1 {
+		// Advanced format: t=1492774577,v1=...,v0=...
+		var timestamp string
+		var sigHashes []string
+		for _, p := range parts {
+			p = strings.TrimSpace(p)
+			if strings.HasPrefix(p, "t=") {
+				timestamp = strings.TrimPrefix(p, "t=")
+			} else if idx := strings.Index(p, "="); idx > 0 && (p[0] == 'v' || strings.HasPrefix(p, "v")) {
+				sigHashes = append(sigHashes, p[idx+1:])
+			}
+		}
+		if timestamp != "" && len(sigHashes) > 0 {
+			signedPayload := []byte(timestamp + "," + string(payload))
+			expected := computeHMAC(signedPayload)
+			for _, sh := range sigHashes {
+				decoded, ok := decodeSig(sh)
+				if ok && hmac.Equal(decoded, expected) {
+					return true
+				}
+			}
+		}
+		return false
+	}
+
+	// Simple format: single hash
+	decoded, ok := decodeSig(signature)
+	if !ok {
+		return false
+	}
+	expected := computeHMAC(payload)
+	return hmac.Equal(decoded, expected)
 }
 
 // GitHubWebhookHandler handles POST /webhooks/github (GitHub or Convoy delivery)
@@ -103,14 +147,18 @@ func GitHubWebhookHandler(temporalClient client.Client) http.HandlerFunc {
 
 		if secret != "" {
 			sig := r.Header.Get("X-Convoy-Signature")
+			encoding := os.Getenv("CONVOY_SIGNATURE_ENCODING")
+			if encoding == "" {
+				encoding = "hex"
+			}
 			if sig == "" {
 				sig = r.Header.Get("X-Hub-Signature-256")
 				if len(sig) >= 7 && strings.HasPrefix(sig, "sha256=") {
 					sig = strings.TrimPrefix(sig, "sha256=")
 				}
 			}
-			if sig == "" || !verifyConvoySignature([]byte(secret), body, sig) {
-				log.Printf("Webhook signature verification failed")
+			if sig == "" || !verifyConvoySignature([]byte(secret), body, sig, encoding) {
+				log.Printf("Webhook signature verification failed (sig=%q)", sig)
 				WriteJSON(w, http.StatusUnauthorized, map[string]string{"error": "signature verification failed"})
 				return
 			}
@@ -173,7 +221,13 @@ func GitHubWebhookHandler(temporalClient client.Client) http.HandlerFunc {
 
 		req.BuildMode = buildMode
 
-		workflowID := "ci-" + strings.ReplaceAll(req.ServiceName, "/", "-")
+		// Unique workflow ID per branch+commit (avoids conflict when multiple triggers)
+		shaShort := req.GitHubSHA
+		if len(shaShort) > 7 {
+			shaShort = shaShort[:7]
+		}
+		branchSafe := strings.ReplaceAll(req.Branch, "/", "-")
+		workflowID := "ci-" + strings.ReplaceAll(req.ServiceName, "/", "-") + "-" + branchSafe + "-" + shaShort
 		options := client.StartWorkflowOptions{
 			ID:        workflowID,
 			TaskQueue: "ci-task-queue",
