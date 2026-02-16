@@ -1,0 +1,32 @@
+# metaflow_manager.toml - Pipeline configuration for metaflow_manager project
+# metaflow_cicd의 metaflow-ci.toml을 참고하여 작성.
+# metaflow_manager는 webhook/trigger 서비스(Go)입니다.
+
+[project]
+name = "metaflow_manager"
+language = "go"
+version = "1.2.4"
+
+[build]
+entrypoint = "flows/runner/metaflow_manager_ci.go"
+pre_build = "go mod download"
+command = "go run flows/runner/metaflow_manager_ci.go"
+
+[config]
+LOG_LEVEL = "DEBUG"
+
+[secrets_mapping]
+# [애플리케이션에서 쓸 환경변수명] = [DB secrets 테이블의 secret_key]
+DB_HOST = "METAFLOW_CICD_DB_HOST"
+DB_PORT = "METAFLOW_CICD_DB_PORT"
+DB_NAME = "METAFLOW_CICD_DB_NAME"
+DB_USER = "METAFLOW_CICD_DB_USER"
+DB_PASSWORD = "METAFLOW_CICD_DB_PASSWORD"
+GIT_TOKEN = "LYCKABC_GIT_TOKEN"
+REGISTRY_ID = "TOJI_REGISTRY_ID"
+REGISTRY_PASSWORD = "TOJI_REGISTRY_PASSWORD"
+REGISTRY_URL = "TOJI_REGISTRY_URL"
+
+[registry]
+enabled = true
+dockerfile = "Dockerfile"
