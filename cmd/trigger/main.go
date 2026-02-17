@@ -19,11 +19,19 @@ func main() {
 		hostPort = "127.0.0.1" + hostPort[len("localhost"):]
 	}
 
-	c, err := client.Dial(client.Options{HostPort: hostPort})
+	ciClient, err := client.Dial(client.Options{HostPort: hostPort, Namespace: "metaflow-ci"})
 	if err != nil {
-		log.Fatalln("Temporal client:", err)
+		log.Fatalln("Temporal CI client:", err)
 	}
-	defer c.Close()
+	defer ciClient.Close()
+
+	cdClient, err := client.Dial(client.Options{HostPort: hostPort, Namespace: "metaflow-cd"})
+	if err != nil {
+		log.Fatalln("Temporal CD client:", err)
+	}
+	defer cdClient.Close()
+
+	starter := &handler.BuildModeAwareWorkflowStarter{CIClient: ciClient, CDClient: cdClient}
 
 	listen := os.Getenv("TRIGGER_LISTEN")
 	if listen == "" {
@@ -37,8 +45,8 @@ func main() {
 	http.HandleFunc("GET /webhooks/github", func(w http.ResponseWriter, r *http.Request) {
 		handler.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
-	http.HandleFunc("POST /trigger", handler.TriggerHandler(c))
-	http.HandleFunc("POST /webhooks/github", handler.GitHubWebhookHandler(c))
+	http.HandleFunc("POST /trigger", handler.TriggerHandler(starter))
+	http.HandleFunc("POST /webhooks/github", handler.GitHubWebhookHandler(starter))
 
 	log.Printf("Trigger listening on %s (POST /trigger, POST /webhooks/github, GET /health)", listen)
 	log.Fatal(http.ListenAndServe(listen, nil))

@@ -199,6 +199,17 @@ func TestTemporalIntegrationWithDevServer(t *testing.T) {
 	// Give worker time to start
 	time.Sleep(500 * time.Millisecond)
 
+	// DevServer uses "default" namespace; override for integration test
+	prevNS := os.Getenv("TEMPORAL_NAMESPACE")
+	os.Setenv("TEMPORAL_NAMESPACE", "default")
+	defer func() {
+		if prevNS != "" {
+			os.Setenv("TEMPORAL_NAMESPACE", prevNS)
+		} else {
+			os.Unsetenv("TEMPORAL_NAMESPACE")
+		}
+	}()
+
 	// Trigger workflow via client
 	err = runTemporalIntegration(ctx, devServer.FrontendHostPort(), "http://localhost:8059",
 		defaultProjectName, defaultRepoURL, defaultBranch, defaultBuildMode,
