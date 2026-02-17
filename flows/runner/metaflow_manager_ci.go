@@ -49,6 +49,14 @@ const (
 	workflowTimeout    = 20 * time.Minute
 )
 
+// namespaceForBuildMode returns Temporal namespace: "metaflow-ci" for ci, "metaflow-cd" for cd.
+func namespaceForBuildMode(mode string) string {
+	if mode == "cd" {
+		return "metaflow-cd"
+	}
+	return "metaflow-ci"
+}
+
 // WorkflowRunner is the interface for executing ManagerWorkflow (for testability).
 type WorkflowRunner interface {
 	ExecuteWorkflow(ctx context.Context, options client.StartWorkflowOptions, workflow interface{}, args ...interface{}) (client.WorkflowRun, error)
@@ -115,9 +123,13 @@ func runTemporalIntegration(ctx context.Context, temporalAddr, apiURL, projectNa
 	}
 
 	fmt.Println(" Connect Temporal & Trigger workflow...")
+	namespace := os.Getenv("TEMPORAL_NAMESPACE")
+	if namespace == "" {
+		namespace = namespaceForBuildMode(mode)
+	}
 	c, err := client.Dial(client.Options{
 		HostPort:  temporalAddr,
-		Namespace: client.DefaultNamespace,
+		Namespace: namespace,
 	})
 	if err != nil {
 		return fmt.Errorf("Temporal client: %w", err)
